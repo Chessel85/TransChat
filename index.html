@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TransChat</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <main>
+    <section id="join-screen" aria-labelledby="join-heading">
+      <h1 id="join-heading">TransChat</h1>
+      <p>Text chat between two people who speak different languages. You read and write in your own language; messages are translated for you.</p>
+      <p id="translator-warning" class="warning" hidden></p>
+
+      <form id="join-form" novalidate>
+        <div class="field">
+          <label for="name">Your name</label>
+          <input id="name" autocomplete="nickname" maxlength="40">
+        </div>
+        <div class="field">
+          <label for="lang">Your language</label>
+          <select id="lang"></select>
+        </div>
+        <div class="field">
+          <label for="room">Room code (leave empty to start a new room)</label>
+          <input id="room" autocomplete="off" spellcheck="false" maxlength="60">
+        </div>
+        <div class="buttons">
+          <button type="submit" id="join-btn">Join room</button>
+          <button type="button" id="new-btn">Start a new room</button>
+        </div>
+      </form>
+      <p id="join-error" class="error" role="alert"></p>
+
+      <p class="note">Messages go directly between your two browsers. Translation is done on your own computer by your browser. Nothing is saved after you close the page.</p>
+    </section>
+
+    <section id="chat-screen" aria-labelledby="chat-heading" hidden>
+      <h1 id="chat-heading" tabindex="-1">TransChat</h1>
+      <p id="status"></p>
+      <button type="button" id="download-btn" hidden>Download translation</button>
+
+      <h2 id="messages-heading">Messages</h2>
+      <ol id="log" tabindex="-1" aria-labelledby="messages-heading"></ol>
+
+      <form id="send-form">
+        <label for="message">Message</label>
+        <textarea id="message" rows="3" maxlength="2000"></textarea>
+        <button type="submit">Send</button>
+      </form>
+
+      <h2>People here</h2>
+      <ul id="people"></ul>
+
+      <div class="buttons">
+        <button type="button" id="copy-btn">Copy invite link</button>
+        <button type="button" id="leave-btn">Leave</button>
+      </div>
+      <p><label><input type="checkbox" id="sounds" checked> Sound cues</label></p>
+
+      <details>
+        <summary>Keyboard shortcuts</summary>
+        <ul>
+          <li>Enter: send message. Shift+Enter: new line.</li>
+          <li>Alt+1 to Alt+9: read the most recent messages again (Alt+1 is the latest).</li>
+          <li>Alt+Shift+1 to Alt+Shift+9: read the original, untranslated text of that message.</li>
+          <li>Alt+P: who is here and what language they speak.</li>
+          <li>Alt+L: move to the message list to review it. Escape or Alt+M: back to the message box.</li>
+        </ul>
+      </details>
+    </section>
+  </main>
+
+  <div id="announcer" class="visually-hidden" aria-live="polite"></div>
+</body>
+</html>

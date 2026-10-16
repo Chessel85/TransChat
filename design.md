@@ -1,0 +1,296 @@
+# TransChat — Design
+
+A browser-based text chat for two or more blind people who speak different languages.
+Each person reads and writes only in their own language; the app translates in between
+and speaks everything through the user's own screen reader.
+
+Hosted as static files on GitHub Pages. No server of our own.
+
+---
+
+## 1. Goals and non-goals
+
+**Goals**
+
+- Fully usable with a screen reader and keyboard alone (NVDA, JAWS, Narrator, VoiceOver on Mac/iOS, TalkBack).
+- Each person picks their language once; they never have to know or choose anyone else's.
+- Works for 2 people first, and for small groups (up to ~8) where everyone may speak a different language.
+- Zero cost, zero install, zero accounts: open a link, type your name, chat.
+- Nothing stored on any server; chat history lives only in the open browser tabs.
+
+**Non-goals (for v1)**
+
+- Voice/video calls, file sharing, message history across sessions, large public rooms.
+- Perfect translation. Machine translation will make mistakes; the design gives people tools to notice and recover (see §5.4).
+
+---
+
+## 2. What changes from the Gemini outline
+
+The Gemini outline is a sound starting point (GitHub Pages + PeerJS/WebRTC + translation API + ARIA live region). I'm keeping that skeleton but changing four things:
+
+| Topic | Gemini outline | This design | Why |
+|---|---|---|---|
+| Who translates | **Sender** translates into the recipient's language | **Each receiver** translates into their own language | With 3+ people speaking 3+ languages, sender-side would need one translation per language per message. Receiver-side is always exactly one translation per reader, and each person's language stays private to their own browser. |
+| Language choice | Not addressed | Chosen on the join screen, defaulted from the browser/OS language, remembered for next time, shared in the join handshake | Your point — this was the missing piece. Details in §4. |
+| Translation engine | Public REST API only | Prefer the browser's built-in on-device translator (Chrome/Edge) when present; fall back to the free MyMemory API; optional own API key | On-device is free, unlimited, fast and private. The REST fallback covers Firefox/Safari. |
+| Screen reader voice | Not addressed | Every message element carries a `lang` attribute | Screen readers switch to the correct voice/pronunciation based on `lang`. Without it, NVDA reading Spanish text with an English voice is nearly unintelligible. Critical for this audience. |
+
+---
+
+## 3. Architecture overview
+
+```
+ ┌──────────────── Browser A (English) ────────────────┐          ┌──────────── Browser B (Spanish) ────────────┐
+ │  UI (semantic HTML + ARIA)                          │          │  UI                                         │
+ │  ├─ Message input  ──► "Hello"                      │          │                                             │
+ │  │                                                  │          │                                             │
+ │  ├─ Protocol: {type:"chat", text:"Hello", lang:"en"}│ ─WebRTC─►│  Protocol receives message                  │
+ │  │                                                  │ data     │  ├─ Translator: en → es  ("Hola")           │
+ │  │                                                  │ channel  │  └─ Log: <li lang="es">Alice: Hola</li>     │
+ │  └─ Log: <li lang="en">You: Hello</li>              │          │       (screen reader speaks it, Spanish voice)
+ └─────────────────────────────────────────────────────┘          └─────────────────────────────────────────────┘
+            │                                                                  │
+            └─────── one-time handshake via PeerJS public signalling server ───┘
+```
+
+Three layers, each a separate small JS module:
+
+1. **Connection layer** (`net.js`) — PeerJS; rooms, peers, join/leave, relaying.
+2. **Translation layer** (`translate.js`) — one function `translate(text, from, to)` with pluggable engines, caching and error handling.
+3. **UI layer** (`ui.js`) — DOM, keyboard handling, live-region announcements, settings.
+
+Plus `app.js` that wires them together, `index.html`, `style.css`, and a `strings/` folder for interface text in multiple languages (§4.3).
+
+No build step: plain ES modules, PeerJS loaded from a pinned CDN version. Opening `index.html` from GitHub Pages is the whole deployment.
+
+---
+
+## 4. Languages
+
+### 4.1 How a user sets their language
+
+On the **join screen** (the first thing anyone sees):
+
+```
+TransChat
+  Your name:      [ Alice              ]
+  Your language:  [ English ▾ ]          ← <select>, pre-filled
+  Room code:      [ blue-tiger-42      ]  ← pre-filled if you came via an invite link
+  [ Start a new room ]   [ Join room ]
+```
+
+- The language `<select>` is pre-selected from `navigator.languages[0]` (the OS/browser language), so most people just press Enter.
+- Each option is written **in its own language** with the English name after it — "Español (Spanish)", "Français (French)", "Deutsch (German)" — and each `<option>` carries its own `lang` attribute so the screen reader pronounces it properly. Someone who doesn't read English can still find their language.
+- The name and language are saved in `localStorage`, so returning users get them pre-filled.
+- Language can be changed later from the Settings dialog; the change is broadcast to the room (§4.2).
+- Option list: the intersection of languages supported by the active translation engines (~30–50 common languages to start). Language codes are BCP-47 (`en`, `es`, `pt-BR`, `zh-Hans`…).
+
+### 4.2 How the other side learns your language
+
+Every peer announces itself with a `hello` message as soon as its connection opens:
+
+```json
+{ "type": "hello", "id": "peer-abc", "name": "Alice", "lang": "en" }
+```
+
+The room host keeps a **roster** (id → name, language) and sends the full roster to newcomers and an update to everyone on changes. So every browser always knows everyone's name and language, and can announce it: *"María joined. Speaks Spanish."*
+
+Important consequence of receiver-side translation: **nobody actually needs anyone else's language to send a message.** You just send your text tagged with *your* language. Each receiver translates from your language into theirs. The roster's language info is used for announcements, for the "who's here" list, and for the back-translation feature (§5.4) — not for the core send path.
+
+### 4.3 Interface language
+
+The app's own interface (buttons, announcements like "connected", "María joined") should also be in the user's language — a Spanish-speaking user shouldn't need to understand "Join room".
+
+- Ship hand-checked string files for a few languages (`strings/en.json`, `es.json`, `fr.json`…).
+- For any other language, machine-translate the English strings once on first use and cache them in `localStorage`.
+- Set `<html lang="…">` to the chosen language so the screen reader uses the right voice for the interface too.
+
+---
+
+## 5. Translation
+
+### 5.1 Engines (tried in order)
+
+1. **Browser built-in Translator API** (Chrome/Edge desktop, recent versions). Runs on-device: free, no limits, nothing leaves the computer. May need a one-off language-pack download the first time a pair is used — the app announces "Downloading Spanish translation, one moment" while this happens.
+2. **MyMemory** (`api.mymemory.translated.net`). Free, no key, CORS-friendly so it works from a static page. Limit ~5,000 characters/day per IP anonymously, ~50,000 if an email address is supplied as a parameter (optional field in Settings). Quality is acceptable for chat.
+3. **Optional user-supplied key** for a paid service (e.g. Google Cloud Translation, which allows browser calls with an API key) entered in Settings and stored only in that browser. For users who want better quality or hit limits.
+
+The engine chosen is per-browser; two people in the same chat can use different engines without noticing.
+
+### 5.2 Rules
+
+- **Same language → no translation.** Two English speakers in a mixed room see each other's text untouched.
+- **Cache** `(text, from, to) → result` in memory so repeated phrases ("ok", "thanks") cost nothing.
+- **Failure is never silent and never blocks delivery.** If translation fails, the original is shown with a marker, e.g. *"María (not translated, Spanish): hola, ¿qué tal?"* — and its `lang="es"` still makes the screen reader read it in a Spanish voice. A status announcement explains why ("Translation limit reached for today").
+- **Order is preserved.** Translations finish at different speeds; messages are inserted into the log in their send order, not completion order (each message has a sequence number per sender).
+- **Length:** split messages over ~450 characters at sentence boundaries for MyMemory's per-request limit.
+
+### 5.3 Language detection (safety net)
+
+People sometimes type in a language other than the one they declared (e.g. a Spanish speaker writing English). If the browser offers a Language Detector API, the receiver checks short messages' actual language and uses that as the source if confidence is high. Without detection we trust the declared language. Low priority; v2.
+
+### 5.4 Checking what the other person will see ("back-translation")
+
+Blind users can't glance at the other person's screen to see if their message came out garbled. Offer an optional setting:
+
+- **"Check my messages before sending"** (off by default): pressing Enter first translates your message into each other participant's language and back into yours, then reads it to you: *"María will read something like: 'Hello, how are you going?' Press Enter to send, Escape to edit."*
+- Lighter alternative available at any time: a shortcut to hear the *original* text of the last received message (useful if you know a bit of the other language, or to paste into another translator).
+
+---
+
+## 6. Connections and rooms
+
+### 6.1 Rooms
+
+- **Start a new room** creates a PeerJS peer whose ID is `transchat-<room code>`. That browser is the **host**.
+- The room code is three easy words plus a number, e.g. `blue-tiger-42` — easy to read out over a phone call, type, or dictate, with no ambiguous characters. Words come from a short English list (they are just tokens; they don't need translating).
+- The app builds an **invite link**: `https://<user>.github.io/TransChat/#blue-tiger-42`. A "Copy invite link" button puts it on the clipboard (announced: "Invite link copied"). Opening the link pre-fills the room code.
+- **Join room** creates a peer with a random ID and connects to `transchat-<room code>`.
+
+### 6.2 Topology: host relays (star)
+
+```
+      Alice (host)
+      /    |    \
+   Bob   María   Kenji
+```
+
+- Each guest holds one connection, to the host. The host forwards every chat message to all other guests.
+- Simple, handles any group size we care about, and only the host needs to be reachable.
+- Downside: if the host closes their tab, the room ends. v1: announce clearly ("Alice was hosting and has left. The chat has ended. Press Enter to start a new room.") v2: host hand-over — the longest-connected guest re-registers the room ID and others reconnect automatically.
+
+### 6.3 Message protocol
+
+All messages are JSON over the PeerJS data channel.
+
+| type | fields | purpose |
+|---|---|---|
+| `hello` | `name`, `lang`, `appVersion` | sent by a peer on connect |
+| `roster` | `peers: [{id, name, lang}]` | host → all, on any change |
+| `chat` | `id`, `from`, `seq`, `lang`, `text`, `ts` | a message, in the sender's language |
+| `typing` | `from`, `active` | optional "María is typing" (off by default — can be chatty for screen readers) |
+| `lang-change` | `from`, `lang` | user changed language mid-chat |
+| `bye` | `from` | clean leave |
+
+The original text is always what's transmitted; translation happens only at the edges. This also means the original is always available to show on request (§5.4).
+
+### 6.4 Network realities
+
+- PeerJS's public signalling server is used only for the handshake; then data flows browser-to-browser, encrypted (DTLS) by WebRTC.
+- Some networks (strict corporate/hotel/mobile NAT) block direct connections. These need a TURN relay. v1 uses STUN only and shows a clear error ("Couldn't connect directly. This network may block it."). v2: configure a free TURN service (e.g. Open Relay) as fallback.
+- Reconnect automatically on brief drops; announce "Connection lost, retrying" / "Reconnected".
+
+---
+
+## 7. Accessibility design
+
+This is the heart of the app, so it gets the most detail.
+
+### 7.1 Page layout (chat screen)
+
+In DOM / reading order:
+
+1. `<h1>` TransChat — room `blue-tiger-42`
+2. **Status region** — visually small, `role="status"` (polite live region). Connection and roster announcements.
+3. **Messages** — `<h2>Messages</h2>` then `<ol id="log" role="log" aria-live="polite">`. Each message is an `<li>`:
+   ```html
+   <li lang="es"><span lang="en">Alice:</span> Hola, ¿cómo estás?</li>
+   ```
+   (Name in a span so the name itself isn't mispronounced by the Spanish voice.)
+4. **People here** — `<h2>` + a list: "Alice (you), English", "María, Spanish".
+5. **Message input** — `<label>` "Message" + `<textarea>`. Focus lives here.
+6. Buttons: Copy invite link, Settings, Leave.
+
+Headings let users jump with H; landmarks (`<main>`, `<aside>` for People) let them jump with D/R.
+
+### 7.2 Announcements
+
+- Incoming messages: appended to the log; the screen reader reads them automatically while focus stays in the input box. Read as *"María: Hola, ¿cómo estás?"* (or translated).
+- **Own messages are added to the log but NOT announced** (`aria-live` suppressed for them, e.g. by inserting into the log via a non-live path or briefly marking `aria-hidden` on insert — to be verified per screen reader). Hearing your own message echoed back is noise.
+- Joins/leaves/language changes go to the status region.
+- **Known quirk:** `role="log"` support varies — some combinations repeat or skip messages. Mitigation: a settings toggle "Announcement method": (a) live log (default), (b) a separate hidden announcer `<div aria-live="polite">` that receives a copy of each message text while the visible log is non-live. Pick defaults after testing (§10).
+
+### 7.3 Keyboard
+
+| Key | Action |
+|---|---|
+| Enter | Send message |
+| Shift+Enter | New line |
+| Escape (in input) | Clear input (with confirm if long) / cancel back-translation check |
+| Alt+1 … Alt+9 | Re-read the 1st…9th most recent message without moving focus (pattern familiar from accessible chat clients) |
+| Alt+Shift+1 … 9 | Read the *original* (untranslated) text of that message |
+| Alt+P | Read who's here and their languages |
+| Alt+L | Move focus to the message log for reviewing history (Escape returns to input) |
+| Alt+S | Open Settings |
+
+Notes: avoid NVDA/JAWS reserved combos (Insert+…, CapsLock+…); Alt+number is free in browsers on Windows but conflicts on some Mac keyboard layouts — Mac uses Ctrl+Option variants or a configurable modifier. Every shortcut is also reachable as a button so nobody has to memorise anything; a "Keyboard help" button (and `?` in log mode) reads the list.
+
+### 7.4 Optional sound cues
+
+Short, distinct earcons (generated with Web Audio, no files): message received, message sent, someone joined, someone left, error. On by default, toggle in Settings. Helpful when the screen reader is busy or muted.
+
+### 7.5 Other
+
+- Visible focus outline, high contrast, respects OS dark mode and text zoom — some users will have low vision rather than none.
+- No timeouts, no auto-dismissing toasts, no CAPTCHA, no drag-and-drop.
+- Mobile: same page works with VoiceOver/TalkBack; Enter-to-send is less natural on touch keyboards, so the Send button is prominent there.
+
+---
+
+## 8. Settings (all stored per browser, `localStorage`)
+
+- Name, my language (broadcast on change)
+- Translation engine preference, optional MyMemory email, optional own API key
+- Check my messages before sending (back-translation) — off
+- Show/announce original alongside translation — off
+- Sound cues — on
+- Announcement method — live log / separate announcer
+- Typing indicators — off
+
+---
+
+## 9. Privacy & safety
+
+- Shown once on the join screen, in the user's language: *"Messages go directly between your browsers. To translate them, the text is sent to a translation service (or translated on your device if your browser supports it). Nothing is saved after you close the page."*
+- No analytics, no cookies, no server logs of our own.
+- Room codes are guessable in principle; for v1 that's acceptable (rooms are short-lived, host sees and announces every join). v2: host can lock the room or approve joiners.
+
+---
+
+## 10. Testing plan
+
+- **Screen readers** (manual, the real test): NVDA + Firefox, NVDA + Chrome, JAWS + Chrome, Narrator + Edge, VoiceOver + Safari (Mac), VoiceOver + Safari (iPhone), TalkBack + Chrome (Android). For each: messages auto-read? read once only? correct voice for `lang`? own messages silent? shortcuts work?
+- **Language pairs:** at least en↔es, en↔fr, en↔zh, en↔ar (right-to-left), plus a 3-person, 3-language room.
+- **Failure cases:** translation API down/limit hit, host leaves, network drop, two tabs on one machine.
+- Ideally a session with real blind users from two language communities before calling v1 done.
+- Automated: unit tests for the translation layer (mocked engines, ordering, caching) and the protocol; axe-core accessibility scan in CI.
+
+---
+
+## 11. Build plan
+
+1. **Skeleton** — join screen, two-person PeerJS connection, plain send/receive, accessible log. *(No translation yet; proves connection + screen-reader behaviour.)*
+2. **Languages & translation** — language picker, `hello`/roster, receiver-side translation via MyMemory, `lang` attributes, failure handling.
+3. **Groups** — host relay, roster announcements, People list.
+4. **Accessibility polish** — shortcuts, re-read last N, sound cues, announcement-method toggle, localized interface strings.
+5. **Built-in translator** engine + optional API key.
+6. **Back-translation check**, view original.
+7. **Hardening** — reconnects, TURN fallback, host hand-over, room lock.
+
+Steps 1–3 give a usable two-language, multi-person chat; that's the natural first milestone to try with real people.
+
+---
+
+## 12. Decisions so far
+
+- **Main case is 2 people.** Groups (build step 3) are deferred; the protocol and receiver-side translation stay group-ready so nothing needs redoing later.
+- **Desktop first.** Testing priority: NVDA, JAWS, Narrator on Windows; VoiceOver on Mac. Mobile later.
+- **Built-in browser translator only, for now** (Chrome 138+). Evaluate its quality before adding MyMemory / API-key engines.
+- **v0.1 announcements** use a separate hidden polite live region (the visible log is not live), so your own messages are naturally silent. Revisit after screen-reader testing.
+- **Hosting:** GitHub repo `Chessel85/TransChat`, served by GitHub Pages.
+
+## 13. Open questions for you
+
+1. **Translation quality vs. cost:** is free MyMemory good enough to start, or would you be willing to have users paste an API key for better results?
+2. **Interface languages:** which languages should have hand-checked interface text first?
