@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Translator Check</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>TransChat translator check</h1>
+    <p>This page tests Chrome's built-in translator and reports what happens. Choose two languages, then press the Test button. Results appear below and are read out.</p>
+    <div class="field">
+      <label for="from">Translate from</label>
+      <select id="from"></select>
+    </div>
+    <div class="field">
+      <label for="to">Translate to</label>
+      <select id="to"></select>
+    </div>
+    <div class="buttons">
+      <button type="button" id="test-btn">Test translation</button>
+      <button type="button" id="copy-btn">Copy results</button>
+    </div>
+    <h2>Results</h2>
+    <ol id="results" aria-live="polite"></ol>
+  </main>
+  <script type="module">
+    import { LANGUAGE_CODES, languageName } from './js/languages.js';
+
+    const $ = id => document.getElementById(id);
+    const results = $('results');
+    const log = text => {
+      const li = document.createElement('li');
+      li.textContent = text;
+      results.append(li);
+    };
+
+    for (const id of ['from', 'to']) {
+      for (const code of LANGUAGE_CODES) {
+        const option = document.createElement('option');
+        option.value = code;
+        option.textContent = languageName(code);
+        $(id).append(option);
+      }
+    }
+    $('from').value = 'en';
+    $('to').value = 'es';
+
+    const chrome = /Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] ?? 'not Chrome';
+    log(`Browser: Chrome ${chrome}. Secure page: ${isSecureContext}. Translator API present: ${'Translator' in self}.`);
+
+    $('test-btn').addEventListener('click', async () => {
+      const from = $('from').value;
+      const to = $('to').value;
+      if (!('Translator' in self)) {
+        log('The Translator API is missing from this browser, so nothing can be tested.');
+        return;
+      }
+      const opts = { sourceLanguage: from, targetLanguage: to };
+      let promise;
+      try {
+        // Call create() straight away, while the button press still counts as a user action.
+        promise = Translator.create({
+          ...opts,
+          monitor(m) {
+            let last = -10;
+            m.addEventListener('downloadprogress', e => {
+              const pct = Math.round(e.loaded * 100);
+              if (pct - last >= 10 || pct === 100) { last = pct; log(`Download progress: ${pct}%`); }
+            });
+          },
+        });
+      } catch (e) {
+        log(`create() threw immediately: ${e.name}: ${e.message}`);
+        return;
+      }
+      try {
+        log(`Availability of ${languageName(from)} to ${languageName(to)} before starting: ${await Translator.availability(opts)}.`);
+      } catch (e) {
+        log(`availability() failed: ${e.name}: ${e.message}`);
+      }
+      log('Creating translator…');
+      try {
+        const translator = await promise;
+        log('Translator ready.');
+        const sample = 'Hello, how are you today?';
+        const out = await translator.translate(sample);
+        log(`Test sentence "${sample}" became: ${out}`);
+      } catch (e) {
+        log(`Creating the translator failed: ${e.name}: ${e.message}`);
+      }
+      try {
+        log(`Availability afterwards: ${await Translator.availability(opts)}.`);
+      } catch { /* already reported */ }
+    });
+
+    $('copy-btn').addEventListener('click', async () => {
+      const text = [...results.children].map(li => li.textContent).join('\n');
+      try {
+        await navigator.clipboard.writeText(text);
+        log('Results copied to the clipboard.');
+      } catch {
+        log('Could not copy the results.');
+      }
+    });
+  </script>
+</body>
+</html>
