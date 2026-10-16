@@ -20,9 +20,9 @@ export async function pairStatus(from, to) {
   }
 }
 
-// Creates (and downloads if needed) a translator for a pair. A download
-// requires a recent user action such as a key press, otherwise this rejects
-// with NotAllowedError.
+// Creates (and downloads if needed) a translator for a pair. Only call this
+// when the pair is 'available', or straight from a key press/click: a download
+// without a recent user action can be refused or left hanging by Chrome.
 export function prepare(from, to, onProgress) {
   const key = `${from}|${to}`;
   if (translators.has(key)) return translators.get(key);
@@ -47,12 +47,20 @@ export async function translate(text, from, to) {
   const cacheKey = `${from}|${to}|${text}`;
   if (cache.has(cacheKey)) return { text: cache.get(cacheKey), lang: to, translated: true, error: null };
 
+  // Never trigger a download from here (no user action); wait for the user to start it.
+  if (!translators.has(`${from}|${to}`)) {
+    const status = await pairStatus(from, to);
+    if (status === 'unavailable') return { text, lang: from, translated: false, error: 'unavailable' };
+    if (status !== 'available') return { text, lang: from, translated: false, error: 'needs-download' };
+  }
+
   try {
     const translator = await prepare(from, to);
     const result = await translator.translate(text);
     cache.set(cacheKey, result);
     return { text: result, lang: to, translated: true, error: null };
   } catch (e) {
+    console.warn('Translation failed', e);
     const error = e?.name === 'NotAllowedError' ? 'needs-download' : 'failed';
     return { text, lang: from, translated: false, error };
   }

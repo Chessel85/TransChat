@@ -251,6 +251,7 @@ function reportTranslationError(error, from) {
   const messages = {
     'unsupported': 'Messages are arriving untranslated because this browser has no built-in translator.',
     'needs-download': 'Messages are arriving untranslated until the translation pack is downloaded. Press any key in the message box to start the download.',
+    'unavailable': `This browser cannot translate from ${languageName(from)}, so the message is shown in the original language.`,
     'failed': `Translation from ${languageName(from)} failed, so the message is shown in the original language.`,
   };
   announce(messages[error]);
@@ -271,14 +272,8 @@ async function setupTranslation(from, to) {
     case 'available':
       translation.prepare(from, to).catch(() => {});
       return;
-    default: // downloadable or downloading
-      try {
-        await downloadTranslation(from, to);
-      } catch (e) {
-        // Usually NotAllowedError (needs a key press first); offer a retry for any failure.
-        console.warn('Translator download failed', e);
-        offerDownload(from, to);
-      }
+    default: // downloadable or downloading: Chrome only downloads after a key press or click
+      offerDownload(from, to);
   }
 }
 
@@ -295,7 +290,25 @@ async function downloadTranslation(from, to) {
   $('status').textContent = `Preparing ${pair} translation…`;
   await promise;
   state.lastErrorAnnounced = null;
-  setStatus(state.other ? `Chatting with ${state.other.name}. ${pair} translation is ready.` : `${pair} translation is ready.`, true);
+  const fixed = await retranslateEarlier(from, to);
+  const earlier = fixed ? ` ${fixed === 1 ? '1 earlier message has' : `${fixed} earlier messages have`} been translated; use Alt+number to hear them.` : '';
+  setStatus(state.other ? `Chatting with ${state.other.name}. ${pair} translation is ready.` : `${pair} translation is ready.`);
+  announce(`${pair} translation is ready.${earlier}`);
+}
+
+// Messages that arrived before the language pack was ready: translate them now
+// and update the log quietly.
+async function retranslateEarlier(from, to) {
+  let count = 0;
+  for (const msg of state.messages) {
+    if (msg.mine || !msg.untranslated || msg.originalLang !== from) continue;
+    const result = await translation.translate(msg.original, from, to);
+    if (result.error) continue;
+    Object.assign(msg, { text: result.text, lang: result.lang, untranslated: false });
+    msg.node?.replaceWith(msg.node = messageNode(msg));
+    count++;
+  }
+  return count;
 }
 
 // Downloads need a user action, so wait for a key press or button click.
@@ -305,7 +318,7 @@ function offerDownload(from, to) {
   const button = $('download-btn');
   button.textContent = `Download ${pair} translation`;
   button.hidden = false;
-  announce(`To translate ${possessive(state.other?.name)} messages, your browser needs to download a ${pair} language pack. Press any key in the message box, or use the Download translation button.`);
+  announce(`To translate ${possessive(state.other?.name)} messages, your browser needs to download the ${pair} language pack. Press any key in the message box, or use the Download translation button.`);
 }
 
 function runPendingDownload() {
@@ -366,7 +379,8 @@ function messageNode(msg, { original = false } = {}) {
 function addMessage(msg, speak) {
   state.messages.push(msg);
   const log = $('log');
-  log.append(messageNode(msg));
+  msg.node = messageNode(msg);
+  log.append(msg.node);
   log.scrollTop = log.scrollHeight;
   if (speak) {
     const p = document.createElement('p');
