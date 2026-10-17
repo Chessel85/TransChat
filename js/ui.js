@@ -2,9 +2,13 @@
 
 const announcer = document.getElementById('announcer');
 
+let lastAnnounced = 0;
+
 // Speaks text (or a node with lang attributes) through the polite live
 // region without moving focus. Each announcement is a new child so repeats
-// are still read; old children are pruned.
+// are still read. Removing a child makes Chrome read the whole region again,
+// so earlier ones are only cleared out together with the next announcement,
+// unless they came just before it (a burst must not lose its first lines).
 export function announce(content, lang) {
   let node;
   if (content instanceof Node) {
@@ -14,8 +18,10 @@ export function announce(content, lang) {
     node.textContent = content;
     if (lang) node.lang = lang;
   }
-  announcer.append(node);
-  while (announcer.children.length > 5) announcer.firstElementChild.remove();
+  const now = Date.now();
+  if (now - lastAnnounced < 1000) announcer.append(node);
+  else announcer.replaceChildren(node);
+  lastAnnounced = now;
 }
 
 let audio = null;
