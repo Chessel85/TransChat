@@ -15,4 +15,6 @@ translated for the reader by Google Translate. Works in any modern browser.
 
 Keyboard shortcuts are listed on the chat screen under "Keyboard shortcuts".
 
+Usage statistics (anonymous): https://transchat-stats.ckgoodwin85.workers.dev/ — the Worker behind it is in [stats-worker](stats-worker/).
+
 See [design.md](design.md) for the full design.

@@ -8,6 +8,7 @@ Last updated: 2026-10-17. Read this first when picking the work back up; [design
 - Translator test page: https://chessel85.github.io/TransChat/diag.html (tests Chrome's built-in translator only).
 - Built so far: rooms of up to 8 equal people over PeerJS (see below), language picker, receiver-side translation, hidden polite live region for announcements, per-message `lang` attributes, Alt+1–9 re-read, Alt+Shift+1–9 original text, Alt+P / Alt+L / Alt+M, sound cues.
 - Decisions: rooms of up to 8 equal people, no host (2026-10-17); desktop first; **translation must work in any browser** (2026-10-17).
+- Anonymous usage statistics (2026-10-17): Cloudflare Worker `transchat-stats` in `stats-worker/`, D1 database `transchat-stats` (account ckgoodwin85, same as WSRSNotesShare). Stats page: https://transchat-stats.ckgoodwin85.workers.dev/ . Redeploy with `wrangler deploy` from `stats-worker/` (not automatic on push). Records per room: start time, last report time, most people at once, language codes.
 - Footer shows "Web site published …" from the page's Last-Modified header, to spot a cached old copy.
 
 ## Rooms (changed 2026-10-17, v0.2.0)

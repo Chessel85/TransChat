@@ -55,6 +55,8 @@ export function openRoom({ code, create, ...handlers }) {
   let claimUntil = 0;
   let claimTimer = null;
   let codeTries = 0;
+  // Random ID for anonymous statistics; passed on to newcomers, never the code.
+  let roomId = create ? [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('') : null;
 
   const me = new Peer(PEER_OPTIONS);
 
@@ -163,6 +165,7 @@ export function openRoom({ code, create, ...handlers }) {
       if (data?.type !== 'members' || !Array.isArray(data.peers)) return;
       opened = true;
       doorId = data.door;
+      if (typeof data.room === 'string') roomId = data.room;
       handlers.onOpen(code, { alone: false });
       for (const id of data.peers) {
         if (typeof id === 'string' && id !== me.id && !conns.has(id)) attach(me.connect(id, CONNECT_OPTIONS), true);
@@ -183,7 +186,7 @@ export function openRoom({ code, create, ...handlers }) {
     if (members.length >= MAX_PEOPLE) {
       c.send({ type: 'full', max: MAX_PEOPLE });
     } else {
-      c.send({ type: 'members', peers: members, door: me.id });
+      c.send({ type: 'members', peers: members, door: me.id, room: roomId });
       clearTimeout(pending.get(c.peer));
       pending.set(c.peer, setTimeout(() => pending.delete(c.peer), PENDING_MS));
     }
@@ -277,6 +280,7 @@ export function openRoom({ code, create, ...handlers }) {
   return {
     get connected() { return conns.size > 0; },
     get code() { return code; },
+    get roomId() { return roomId; },
     send(message) {
       broadcast(message);
       return conns.size > 0;

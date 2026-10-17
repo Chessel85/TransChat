@@ -2,6 +2,7 @@ import { LANGUAGE_CODES, languageName, nativeName, defaultLanguage } from './lan
 import * as translation from './translate.js';
 import { openRoom, makeRoomCode, normalizeCode } from './net.js';
 import { announce, sounds } from './ui.js';
+import { report } from './stats.js';
 
 const APP_VERSION = '0.2.0';
 const UI_LANG = document.documentElement.lang;
@@ -24,7 +25,24 @@ const state = {
   seq: 0,
   displayChain: Promise.resolve(),
   lastErrorAnnounced: null,
+  stats: null,          // { people, langs, reported } for the anonymous leave report
 };
+
+// ---------- Anonymous statistics ----------
+
+function noteRoomSize() {
+  if (!state.stats) return;
+  state.stats.people = Math.max(state.stats.people, state.others.size + 1);
+  for (const p of state.others.values()) state.stats.langs.add(p.lang);
+}
+
+// Sent once, when leaving or closing the page.
+function reportLeave() {
+  const room = state.session?.roomId;
+  if (!room || !state.stats || state.stats.reported) return;
+  state.stats.reported = true;
+  report({ type: 'leave', room, people: state.stats.people, langs: [...state.stats.langs] });
+}
 
 // ---------- Join screen ----------
 
@@ -86,6 +104,7 @@ function startSession(create, code) {
   state.code = code;
   state.others.clear();
   state.existing.clear();
+  state.stats = { people: 1, langs: new Set([state.me.lang]), reported: false };
   $('join-error').textContent = '';
   setJoinBusy(true);
   announce(create ? 'Opening a new room…' : `Connecting to room ${spoken(code)}…`);
@@ -95,6 +114,7 @@ function startSession(create, code) {
     create,
     onOpen: (roomCode, { alone }) => {
       state.code = roomCode;
+      if (alone) report({ type: 'start', room: state.session.roomId, langs: [state.me.lang] });
       showChatScreen();
       if (alone) setStatus(`Room ${roomCode} is open. Waiting for others to join. Share the room code or the invite link.`, true);
       else setStatus(`You are in room ${roomCode}.`, true);
@@ -132,6 +152,7 @@ function showChatScreen() {
 }
 
 function leaveChat() {
+  reportLeave();
   state.session?.close();
   state.session = null;
   state.inChat = false;
@@ -205,6 +226,7 @@ function handleHello(id, data) {
   const lang = LANGUAGE_CODES.includes(data.lang) ? data.lang : String(data.lang || 'en').slice(0, 20);
   const known = state.others.has(id);
   state.others.set(id, { name, lang });
+  noteRoomSize();
   renderPeople();
   setStatus(chattingStatus());
   if (known) return;
@@ -443,7 +465,10 @@ function initChatScreen() {
     }
   });
 
-  window.addEventListener('pagehide', () => state.session?.close());
+  window.addEventListener('pagehide', () => {
+    reportLeave();
+    state.session?.close();
+  });
 }
 
 // GitHub Pages sends each deploy's time as the page's Last-Modified date, so

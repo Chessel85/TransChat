@@ -1,0 +1,12 @@
+name = "transchat-stats"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# Create the database first:
+#   wrangler d1 create transchat-stats
+# then paste the returned database_id below, and apply the schema:
+#   wrangler d1 execute transchat-stats --remote --file=schema.sql
+[[d1_databases]]
+binding = "DB"
+database_name = "transchat-stats"
+database_id = "b3a92d63-7907-43f9-9341-cddad75981ea"

@@ -262,7 +262,7 @@ Short, distinct earcons (generated with Web Audio, no files): message received, 
 ## 9. Privacy & safety
 
 - Shown once on the join screen, in the user's language: *"Messages go directly between your browsers. To translate them, each message is sent to Google Translate. Nothing is saved by TransChat after you close the page."*
-- No analytics, no cookies, no server logs of our own.
+- No cookies. Anonymous usage statistics only (2026-10-17): a Cloudflare Worker (`stats-worker/`, D1 database `transchat-stats`) receives a "start" report from a room's creator and a "leave" report from everyone, sent with `navigator.sendBeacon`. Each carries a random room ID (not the room code), the most people seen at once, and language codes. No names, messages, room codes or IP addresses are stored. Summary page: https://transchat-stats.ckgoodwin85.workers.dev/
 - Room codes are guessable in principle; for v1 that's acceptable (rooms are short-lived, everyone hears every join announced). v2: a way to lock the room or approve joiners.
 
 ---
