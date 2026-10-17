@@ -1,5 +1,5 @@
-// Languages offered in the picker: those Chrome's built-in translator handles.
-// Whether a particular pair works is still checked at runtime.
+// Languages offered in the picker. Google Translate handles all of them; the
+// list started as the set Chrome's built-in translator supports.
 export const LANGUAGE_CODES = [
   'ar', 'bg', 'bn', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'he',
   'hi', 'hr', 'hu', 'id', 'it', 'ja', 'kn', 'ko', 'lt', 'mr', 'nl', 'no',

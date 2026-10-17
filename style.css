@@ -114,7 +114,6 @@ button[type="button"] { background: transparent; color: var(--fg); }
 #send-form { margin-top: 1rem; }
 #send-form button { margin-top: 0.5rem; }
 
-#download-btn { margin-bottom: 0.5rem; }
 
 .visually-hidden {
   position: absolute;

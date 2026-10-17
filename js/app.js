@@ -23,7 +23,6 @@ const state = {
   messages: [],         // { mine, name, text, lang, original, originalLang, untranslated }
   seq: 0,
   displayChain: Promise.resolve(),
-  pendingDownload: null,
   lastErrorAnnounced: null,
 };
 
@@ -45,12 +44,6 @@ function initJoinScreen() {
   $('room').value = location.hash.slice(1);
   $('sounds').checked = store.get('sounds') !== 'off';
   sounds.enabled = $('sounds').checked;
-
-  if (!translation.builtInSupported()) {
-    const warning = $('translator-warning');
-    warning.textContent = 'This browser has no built-in translator. For translation, use Google Chrome version 138 or later on a desktop computer. You can still chat here, but messages will not be translated.';
-    warning.hidden = false;
-  }
 
   $('join-form').addEventListener('submit', e => {
     e.preventDefault();
@@ -135,10 +128,8 @@ function leaveChat() {
   state.inChat = false;
   state.other = null;
   state.messages = [];
-  state.pendingDownload = null;
   state.lastErrorAnnounced = null;
   $('log').replaceChildren();
-  $('download-btn').hidden = true;
   $('chat-screen').hidden = true;
   $('join-screen').hidden = false;
   $('room').value = '';
@@ -211,7 +202,6 @@ function handleHello(data) {
   const sameLanguage = lang === state.me.lang;
   announce(`${name} joined. Speaks ${languageName(lang)}.${sameLanguage ? ' Same language as you, so no translation is needed.' : ''}`);
   setStatus(`Chatting with ${name}.`);
-  if (!sameLanguage) setupTranslation(lang, state.me.lang);
 }
 
 function handlePeerLeft() {
@@ -241,96 +231,43 @@ function receiveChat(data) {
       originalLang: data.lang,
       untranslated: !!result.error,
     }, true);
-    if (result.error) reportTranslationError(result.error, data.lang);
+    if (result.error) reportTranslationError(result, data.lang);
+    else if (state.lastErrorAnnounced) await translationRecovered();
   });
 }
 
-function reportTranslationError(error, from) {
+function reportTranslationError({ error, detail }, from) {
   if (state.lastErrorAnnounced === error) return;
   state.lastErrorAnnounced = error;
+  const original = 'so messages are shown in the original language until it works again.';
   const messages = {
-    'unsupported': 'Messages are arriving untranslated because this browser has no built-in translator.',
-    'needs-download': 'Messages are arriving untranslated until the translation pack is downloaded. Press any key in the message box to start the download.',
-    'unavailable': `This browser cannot translate from ${languageName(from)}, so the message is shown in the original language.`,
-    'failed': `Translation from ${languageName(from)} failed, so the message is shown in the original language.`,
+    'offline': `This computer seems to be offline, ${original}`,
+    'network': `Could not reach the translation service, ${original}`,
+    'timeout': `The translation service did not reply in time, ${original}`,
+    'busy': `The translation service is refusing requests for now because there have been too many, ${original}`,
+    'failed': `Translation from ${languageName(from)} failed, ${original}`,
   };
-  announce(messages[error]);
+  const text = `${messages[error] ?? messages.failed}${detail ? ` Details: ${detail}.` : ''}`;
+  setStatus(text);
+  announce(text);
 }
 
-// ---------- Translation setup ----------
-
-async function setupTranslation(from, to) {
-  const status = await translation.pairStatus(from, to);
-  const pair = `${languageName(from)} to ${languageName(to)}`;
-  switch (status) {
-    case 'unsupported':
-      announce(`This browser has no built-in translator, so ${possessive(state.other?.name)} messages will not be translated. Use Google Chrome version 138 or later.`);
-      return;
-    case 'unavailable':
-      announce(`This browser cannot translate ${pair}. Messages will arrive untranslated.`);
-      return;
-    case 'available':
-      translation.prepare(from, to).catch(() => {});
-      return;
-    default: // downloadable or downloading: Chrome only downloads after a key press or click
-      offerDownload(from, to);
-  }
-}
-
-async function downloadTranslation(from, to) {
-  const pair = `${languageName(from)} to ${languageName(to)}`;
-  let lastShown = -1;
-  const promise = translation.prepare(from, to, loaded => {
-    const percent = Math.round(loaded * 100);
-    if (percent !== lastShown) {
-      lastShown = percent;
-      $('status').textContent = `Downloading ${pair} translation: ${percent}%`;
-    }
-  });
-  $('status').textContent = `Preparing ${pair} translation…`;
-  await promise;
-  state.lastErrorAnnounced = null;
-  const fixed = await retranslateEarlier(from, to);
-  const earlier = fixed ? ` ${fixed === 1 ? '1 earlier message has' : `${fixed} earlier messages have`} been translated; use Alt+number to hear them.` : '';
-  setStatus(state.other ? `Chatting with ${state.other.name}. ${pair} translation is ready.` : `${pair} translation is ready.`);
-  announce(`${pair} translation is ready.${earlier}`);
-}
-
-// Messages that arrived before the language pack was ready: translate them now
+// Translation works again: translate the messages that arrived untranslated
 // and update the log quietly.
-async function retranslateEarlier(from, to) {
-  let count = 0;
+async function translationRecovered() {
+  state.lastErrorAnnounced = null;
+  let fixed = 0;
   for (const msg of state.messages) {
-    if (msg.mine || !msg.untranslated || msg.originalLang !== from) continue;
-    const result = await translation.translate(msg.original, from, to);
+    if (msg.mine || !msg.untranslated) continue;
+    const result = await translation.translate(msg.original, msg.originalLang, state.me.lang);
     if (result.error) continue;
     Object.assign(msg, { text: result.text, lang: result.lang, untranslated: false });
     msg.node?.replaceWith(msg.node = messageNode(msg));
-    count++;
+    fixed++;
   }
-  return count;
-}
-
-// Downloads need a user action, so wait for a key press or button click.
-function offerDownload(from, to) {
-  const pair = `${languageName(from)} to ${languageName(to)}`;
-  state.pendingDownload = () => downloadTranslation(from, to);
-  const button = $('download-btn');
-  button.textContent = `Download ${pair} translation`;
-  button.hidden = false;
-  announce(`To translate ${possessive(state.other?.name)} messages, your browser needs to download the ${pair} language pack. Press any key in the message box, or use the Download translation button.`);
-}
-
-function runPendingDownload() {
-  const run = state.pendingDownload;
-  if (!run) return;
-  state.pendingDownload = null;
-  $('download-btn').hidden = true;
-  announce('Downloading the translation pack. This only happens once.');
-  run().catch(e => {
-    console.warn('Translator download failed', e);
-    announce(`The translation download failed: ${e?.message ?? 'unknown error'}.`);
-  });
+  const earlier = fixed ? ` ${fixed === 1 ? '1 earlier message has' : `${fixed} earlier messages have`} been translated; use Alt+number to hear them.` : '';
+  setStatus(state.other ? `Chatting with ${state.other.name}.` : '');
+  announce(`Translation is working again.${earlier}`);
 }
 
 // ---------- Sending ----------
@@ -449,14 +386,12 @@ function initChatScreen() {
   });
 
   $('message').addEventListener('keydown', e => {
-    if (state.pendingDownload) runPendingDownload();
     if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !e.isComposing) {
       e.preventDefault();
       sendMessage();
     }
   });
 
-  $('download-btn').addEventListener('click', runPendingDownload);
   $('leave-btn').addEventListener('click', leaveChat);
   $('sounds').addEventListener('change', e => {
     sounds.enabled = e.target.checked;

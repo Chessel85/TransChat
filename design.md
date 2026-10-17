@@ -33,7 +33,7 @@ The Gemini outline is a sound starting point (GitHub Pages + PeerJS/WebRTC + tra
 |---|---|---|---|
 | Who translates | **Sender** translates into the recipient's language | **Each receiver** translates into their own language | With 3+ people speaking 3+ languages, sender-side would need one translation per language per message. Receiver-side is always exactly one translation per reader, and each person's language stays private to their own browser. |
 | Language choice | Not addressed | Chosen on the join screen, defaulted from the browser/OS language, remembered for next time, shared in the join handshake | Your point — this was the missing piece. Details in §4. |
-| Translation engine | Public REST API only | Prefer the browser's built-in on-device translator (Chrome/Edge) when present; fall back to the free MyMemory API; optional own API key | On-device is free, unlimited, fast and private. The REST fallback covers Firefox/Safari. |
+| Translation engine | Public REST API only | Google Translate's free web endpoint (as NVDA Instant Translate uses), with the browser's built-in translator as a fallback | Works in every browser with no key or downloads; good quality. See §5.1. |
 | Screen reader voice | Not addressed | Every message element carries a `lang` attribute | Screen readers switch to the correct voice/pronunciation based on `lang`. Without it, NVDA reading Spanish text with an English voice is nearly unintelligible. Critical for this audience. |
 
 ---
@@ -112,11 +112,11 @@ The app's own interface (buttons, announcements like "connected", "María joined
 
 ### 5.1 Engines (tried in order)
 
-1. **Browser built-in Translator API** (Chrome/Edge desktop, recent versions). Runs on-device: free, no limits, nothing leaves the computer. May need a one-off language-pack download the first time a pair is used — the app announces "Downloading Spanish translation, one moment" while this happens.
-2. **MyMemory** (`api.mymemory.translated.net`). Free, no key, CORS-friendly so it works from a static page. Limit ~5,000 characters/day per IP anonymously, ~50,000 if an email address is supplied as a parameter (optional field in Settings). Quality is acceptable for chat.
-3. **Optional user-supplied key** for a paid service (e.g. Google Cloud Translation, which allows browser calls with an API key) entered in Settings and stored only in that browser. For users who want better quality or hit limits.
+1. **Google Translate's free web endpoint** (`translate.googleapis.com/translate_a/single?client=gtx`), the same kind of service NVDA's Instant Translate add-on uses. No key, allows calls from any website (`Access-Control-Allow-Origin: *`), so it works in every browser. Sent as a form POST so long messages fit. Unofficial and undocumented: Google may throttle it (HTTP 429) or change it without notice. Messages are sent to Google.
+2. **Browser built-in Translator API** (Chrome 138+ desktop), only as a fallback and only for pairs already on the computer (`availability()` is `available`), because downloading a language pack needs a key press or click.
+3. Otherwise the original text is shown, marked "not translated", and the reason (including the actual error detail) is announced once. When a later message translates again, earlier untranslated messages are re-translated quietly and "Translation is working again" is announced.
 
-The engine chosen is per-browser; two people in the same chat can use different engines without noticing.
+Possible later engines if the Google endpoint proves unreliable: MyMemory (free, small daily quota), a paid service behind a small proxy, or Mozilla's Bergamot engine running in the page.
 
 ### 5.2 Rules
 
@@ -124,7 +124,6 @@ The engine chosen is per-browser; two people in the same chat can use different 
 - **Cache** `(text, from, to) → result` in memory so repeated phrases ("ok", "thanks") cost nothing.
 - **Failure is never silent and never blocks delivery.** If translation fails, the original is shown with a marker, e.g. *"María (not translated, Spanish): hola, ¿qué tal?"* — and its `lang="es"` still makes the screen reader read it in a Spanish voice. A status announcement explains why ("Translation limit reached for today").
 - **Order is preserved.** Translations finish at different speeds; messages are inserted into the log in their send order, not completion order (each message has a sequence number per sender).
-- **Length:** split messages over ~450 characters at sentence boundaries for MyMemory's per-request limit.
 
 ### 5.3 Language detection (safety net)
 
@@ -252,7 +251,7 @@ Short, distinct earcons (generated with Web Audio, no files): message received, 
 
 ## 9. Privacy & safety
 
-- Shown once on the join screen, in the user's language: *"Messages go directly between your browsers. To translate them, the text is sent to a translation service (or translated on your device if your browser supports it). Nothing is saved after you close the page."*
+- Shown once on the join screen, in the user's language: *"Messages go directly between your browsers. To translate them, each message is sent to Google Translate. Nothing is saved by TransChat after you close the page."*
 - No analytics, no cookies, no server logs of our own.
 - Room codes are guessable in principle; for v1 that's acceptable (rooms are short-lived, host sees and announces every join). v2: host can lock the room or approve joiners.
 
@@ -271,7 +270,7 @@ Short, distinct earcons (generated with Web Audio, no files): message received, 
 ## 11. Build plan
 
 1. **Skeleton** — join screen, two-person PeerJS connection, plain send/receive, accessible log. *(No translation yet; proves connection + screen-reader behaviour.)*
-2. **Languages & translation** — language picker, `hello`/roster, receiver-side translation via MyMemory, `lang` attributes, failure handling.
+2. **Languages & translation** — language picker, `hello`/roster, receiver-side translation, `lang` attributes, failure handling.
 3. **Groups** — host relay, roster announcements, People list.
 4. **Accessibility polish** — shortcuts, re-read last N, sound cues, announcement-method toggle, localized interface strings.
 5. **Built-in translator** engine + optional API key.
@@ -286,11 +285,11 @@ Steps 1–3 give a usable two-language, multi-person chat; that's the natural fi
 
 - **Main case is 2 people.** Groups (build step 3) are deferred; the protocol and receiver-side translation stay group-ready so nothing needs redoing later.
 - **Desktop first.** Testing priority: NVDA, JAWS, Narrator on Windows; VoiceOver on Mac. Mobile later.
-- **Built-in browser translator only, for now** (Chrome 138+). Evaluate its quality before adding MyMemory / API-key engines.
+- **Translation must not depend on the browser** (2026-10-17). Google Translate's free endpoint is the main engine for every browser; Chrome's built-in translator is a fallback only. This replaced the earlier "Chrome built-in translator only" decision, which tied users to Chrome and needed language-pack downloads.
 - **v0.1 announcements** use a separate hidden polite live region (the visible log is not live), so your own messages are naturally silent. Revisit after screen-reader testing.
 - **Hosting:** GitHub repo `Chessel85/TransChat`, served by GitHub Pages.
 
 ## 13. Open questions for you
 
-1. **Translation quality vs. cost:** is free MyMemory good enough to start, or would you be willing to have users paste an API key for better results?
+1. **Translation reliability:** is Google's free endpoint reliable enough in real use, or is a paid service with a small proxy needed later?
 2. **Interface languages:** which languages should have hand-checked interface text first?
