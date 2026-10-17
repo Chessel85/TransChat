@@ -94,7 +94,7 @@ Every peer announces itself with a `hello` message as soon as its connection ope
 { "type": "hello", "id": "peer-abc", "name": "Alice", "lang": "en" }
 ```
 
-The room host keeps a **roster** (id → name, language) and sends the full roster to newcomers and an update to everyone on changes. So every browser always knows everyone's name and language, and can announce it: *"María joined. Speaks Spanish."*
+Each person sends a `hello` (name, language) to everyone they connect to. So every browser always knows everyone's name and language, and can announce it: *"María joined. Speaks Spanish."*
 
 Important consequence of receiver-side translation: **nobody actually needs anyone else's language to send a message.** You just send your text tagged with *your* language. Each receiver translates from your language into theirs. The roster's language info is used for announcements, for the "who's here" list, and for the back-translation feature (§5.4) — not for the core send path.
 
@@ -142,35 +142,45 @@ Blind users can't glance at the other person's screen to see if their message ca
 
 ### 6.1 Rooms
 
-- **Start a new room** creates a PeerJS peer whose ID is `transchat-<room code>`. That browser is the **host**.
-- The room code is three easy words plus a number, e.g. `blue-tiger-42` — easy to read out over a phone call, type, or dictate, with no ambiguous characters. Words come from a short English list (they are just tokens; they don't need translating).
+- Rooms hold up to 8 people (`MAX_PEOPLE` in `net.js`), all equal. The practical limits are listening (every message is spoken) and the free translation endpoint's rate limits, not the network.
+- Every browser has its own random PeerJS ID. The room code maps to a second ID, `transchat-v2-<room code>`, held by one browser at a time: the **doorkeeper**.
+- The room code is three easy words plus a number, e.g. `blue-tiger-42` — easy to read out over a phone call, type, or dictate, with no ambiguous characters. Words come from a short English list (they are just tokens; they don't need translating). If a new code is taken, another is picked quietly.
 - The app builds an **invite link**: `https://<user>.github.io/TransChat/#blue-tiger-42`. A "Copy invite link" button puts it on the clipboard (announced: "Invite link copied"). Opening the link pre-fills the room code.
-- **Join room** creates a peer with a random ID and connects to `transchat-<room code>`.
+- **Start a new room** claims the room code's ID, making that browser the first doorkeeper.
+- **Join room** "knocks": connects to the room code's ID, gets back the list of members' personal IDs (or "full"), closes that connection, and connects directly to every member. Members already there are announced as "is here"; people arriving later as "joined".
 
-### 6.2 Topology: host relays (star)
+### 6.2 Topology: everyone connected to everyone (mesh)
 
 ```
-      Alice (host)
-      /    |    \
-   Bob   María   Kenji
+   Alice ── Bob
+     │  ╲  ╱ │
+     │   ╳   │
+     │  ╱  ╲ │
+   María ── Kenji
 ```
 
-- Each guest holds one connection, to the host. The host forwards every chat message to all other guests.
-- Simple, handles any group size we care about, and only the host needs to be reachable.
-- Downside: if the host closes their tab, the room ends. v1: announce clearly ("Alice was hosting and has left. The chat has ended. Press Enter to start a new room.") v2: host hand-over — the longest-connected guest re-registers the room ID and others reconnect automatically.
+- Each browser connects directly to every other (8 people: 7 connections each, 28 in all — trivial for text). Messages go straight from the sender to each reader; nobody relays.
+- The doorkeeper's only job is answering knocks. It also counts newcomers it has just told about the room as members for 30 seconds, so two people joining at the same moment learn about each other.
+- **Hand-over:** when the doorkeeper leaves, everyone remaining tries to claim the room code's ID after a random delay of up to 1.5 s; the server gives it to the first, who tells the others (`door` message). If the server still holds the old ID (the doorkeeper's browser froze rather than closed), claims are retried every 5 s for 2 minutes. Measured: about 1–4 s after a clean leave or closed tab; about 80 s after a frozen browser.
+- Newcomers knocking during a hand-over get "not found" and retry for about 9 s before giving up.
+- **Liveness:** everyone pings everyone every 5 s; a connection silent for 20 s is dropped and announced as "left". A `bye` is treated as leaving immediately.
+- The room ends only when the last person leaves.
+- Known gap: if one pair of members cannot connect directly (blocking network) they don't see each other's messages; the newcomer is told. A fix would be others relaying for that pair — only if it turns up in real use.
 
 ### 6.3 Message protocol
 
-All messages are JSON over the PeerJS data channel.
+All messages are JSON over PeerJS data channels.
 
 | type | fields | purpose |
 |---|---|---|
-| `hello` | `name`, `lang`, `appVersion` | sent by a peer on connect |
-| `roster` | `peers: [{id, name, lang}]` | host → all, on any change |
-| `chat` | `id`, `from`, `seq`, `lang`, `text`, `ts` | a message, in the sender's language |
-| `typing` | `from`, `active` | optional "María is typing" (off by default — can be chatty for screen readers) |
-| `lang-change` | `from`, `lang` | user changed language mid-chat |
-| `bye` | `from` | clean leave |
+| `members` | `peers: [id]`, `door` | doorkeeper → knocking newcomer |
+| `full` | `max` | doorkeeper → knocking newcomer when the room is full |
+| `hello` | `name`, `lang`, `appVersion` | sent to each person on connecting |
+| `door` | — | "I am the doorkeeper now", after a hand-over |
+| `chat` | `id`, `seq`, `lang`, `text`, `ts` | a message, in the sender's language |
+| `ping` | — | liveness, every 5 s |
+| `bye` | — | clean leave |
+| `typing`, `lang-change` | | not built yet |
 
 The original text is always what's transmitted; translation happens only at the edges. This also means the original is always available to show on request (§5.4).
 
@@ -253,7 +263,7 @@ Short, distinct earcons (generated with Web Audio, no files): message received, 
 
 - Shown once on the join screen, in the user's language: *"Messages go directly between your browsers. To translate them, each message is sent to Google Translate. Nothing is saved by TransChat after you close the page."*
 - No analytics, no cookies, no server logs of our own.
-- Room codes are guessable in principle; for v1 that's acceptable (rooms are short-lived, host sees and announces every join). v2: host can lock the room or approve joiners.
+- Room codes are guessable in principle; for v1 that's acceptable (rooms are short-lived, everyone hears every join announced). v2: a way to lock the room or approve joiners.
 
 ---
 
@@ -261,7 +271,7 @@ Short, distinct earcons (generated with Web Audio, no files): message received, 
 
 - **Screen readers** (manual, the real test): NVDA + Firefox, NVDA + Chrome, JAWS + Chrome, Narrator + Edge, VoiceOver + Safari (Mac), VoiceOver + Safari (iPhone), TalkBack + Chrome (Android). For each: messages auto-read? read once only? correct voice for `lang`? own messages silent? shortcuts work?
 - **Language pairs:** at least en↔es, en↔fr, en↔zh, en↔ar (right-to-left), plus a 3-person, 3-language room.
-- **Failure cases:** translation API down/limit hit, host leaves, network drop, two tabs on one machine.
+- **Failure cases:** translation API down/limit hit, doorkeeper leaves or freezes, network drop, two tabs on one machine.
 - Ideally a session with real blind users from two language communities before calling v1 done.
 - Automated: unit tests for the translation layer (mocked engines, ordering, caching) and the protocol; axe-core accessibility scan in CI.
 
@@ -271,11 +281,11 @@ Short, distinct earcons (generated with Web Audio, no files): message received, 
 
 1. **Skeleton** — join screen, two-person PeerJS connection, plain send/receive, accessible log. *(No translation yet; proves connection + screen-reader behaviour.)*
 2. **Languages & translation** — language picker, `hello`/roster, receiver-side translation, `lang` attributes, failure handling.
-3. **Groups** — host relay, roster announcements, People list.
+3. **Groups** — everyone-connected rooms with doorkeeper hand-over, join/leave announcements, People list.
 4. **Accessibility polish** — shortcuts, re-read last N, sound cues, announcement-method toggle, localized interface strings.
 5. **Built-in translator** engine + optional API key.
 6. **Back-translation check**, view original.
-7. **Hardening** — reconnects, TURN fallback, host hand-over, room lock.
+7. **Hardening** — reconnects, TURN fallback, room lock.
 
 Steps 1–3 give a usable two-language, multi-person chat; that's the natural first milestone to try with real people.
 
@@ -283,7 +293,7 @@ Steps 1–3 give a usable two-language, multi-person chat; that's the natural fi
 
 ## 12. Decisions so far
 
-- **Main case is 2 people.** Groups (build step 3) are deferred; the protocol and receiver-side translation stay group-ready so nothing needs redoing later.
+- **Rooms of up to 8 equal people** (2026-10-17). No host: everyone connects to everyone, and the room code is held by a doorkeeper role that passes on automatically, so the room lasts until the last person leaves (§6.2). Replaced "2 people first".
 - **Desktop first.** Testing priority: NVDA, JAWS, Narrator on Windows; VoiceOver on Mac. Mobile later.
 - **Translation must not depend on the browser** (2026-10-17). Google Translate's free endpoint is the main engine for every browser; Chrome's built-in translator is a fallback only. This replaced the earlier "Chrome built-in translator only" decision, which tied users to Chrome and needed language-pack downloads.
 - **v0.1 announcements** use a separate hidden polite live region (the visible log is not live), so your own messages are naturally silent. Revisit after screen-reader testing.

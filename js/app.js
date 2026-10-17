@@ -3,7 +3,7 @@ import * as translation from './translate.js';
 import { openRoom, makeRoomCode, normalizeCode } from './net.js';
 import { announce, sounds } from './ui.js';
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 const UI_LANG = document.documentElement.lang;
 
 const $ = id => document.getElementById(id);
@@ -15,10 +15,10 @@ const store = {
 
 const state = {
   me: { name: '', lang: 'en' },
-  other: null,          // { name, lang } once their hello arrives
+  others: new Map(),    // peer id -> { name, lang }, once their hello arrives
+  existing: new Map(),  // peer id -> true if they were here before us (until their hello)
   session: null,
   code: '',
-  asHost: false,
   inChat: false,
   messages: [],         // { mine, name, text, lang, original, originalLang, untranslated }
   seq: 0,
@@ -71,7 +71,7 @@ function setJoinBusy(busy) {
   for (const id of ['join-btn', 'new-btn']) $(id).disabled = busy;
 }
 
-function startSession(asHost, code) {
+function startSession(create, code) {
   const name = $('name').value.trim();
   if (!name) {
     showJoinError('Please enter your name.');
@@ -84,27 +84,36 @@ function startSession(asHost, code) {
   sounds.unlock();
 
   state.code = code;
-  state.asHost = asHost;
-  state.other = null;
+  state.others.clear();
+  state.existing.clear();
   $('join-error').textContent = '';
   setJoinBusy(true);
-  announce(asHost ? 'Opening a new room…' : `Connecting to room ${spoken(code)}…`);
+  announce(create ? 'Opening a new room…' : `Connecting to room ${spoken(code)}…`);
 
   state.session = openRoom({
     code,
-    asHost,
-    onReady: () => {
-      if (asHost) {
-        showChatScreen();
-        setStatus(`Room ${code} is open. Waiting for someone to join. Share the room code or the invite link.`, true);
-      }
+    create,
+    onOpen: (roomCode, { alone }) => {
+      state.code = roomCode;
+      showChatScreen();
+      if (alone) setStatus(`Room ${roomCode} is open. Waiting for others to join. Share the room code or the invite link.`, true);
+      else setStatus(`You are in room ${roomCode}.`, true);
     },
-    onConnected: () => {
-      if (!state.inChat) showChatScreen();
-      state.session.send({ type: 'hello', name: state.me.name, lang: state.me.lang, appVersion: APP_VERSION });
+    onPeerConnected: (id, { existing }) => {
+      state.existing.set(id, existing);
+      state.session.sendTo(id, { type: 'hello', name: state.me.name, lang: state.me.lang, appVersion: APP_VERSION });
     },
     onMessage: handleMessage,
     onPeerLeft: handlePeerLeft,
+    onConnectFailed: () => {
+      sounds.error();
+      announce('Could not connect to one of the people in the room, so you will not see each other’s messages. A network may be blocking direct connections.');
+    },
+    onFull: max => {
+      state.session?.close();
+      state.session = null;
+      backToJoin(`That room is full: it already has ${max} people.`);
+    },
     onError: handleNetError,
   });
 }
@@ -126,7 +135,8 @@ function leaveChat() {
   state.session?.close();
   state.session = null;
   state.inChat = false;
-  state.other = null;
+  state.others.clear();
+  state.existing.clear();
   state.messages = [];
   state.lastErrorAnnounced = null;
   $('log').replaceChildren();
@@ -147,9 +157,7 @@ function setStatus(text, speak = false) {
 function renderPeople() {
   const list = $('people');
   list.replaceChildren();
-  const people = [{ ...state.me, you: true }];
-  if (state.other) people.push(state.other);
-  for (const p of people) {
+  for (const p of [{ ...state.me, you: true }, ...state.others.values()]) {
     const li = document.createElement('li');
     li.textContent = `${p.you ? `${p.name} (you)` : p.name}, ${languageName(p.lang)}`;
     list.append(li);
@@ -158,13 +166,20 @@ function renderPeople() {
 
 function peopleSummary() {
   const you = `You, ${state.me.name}, ${languageName(state.me.lang)}.`;
-  return state.other
-    ? `${you} ${state.other.name}, ${languageName(state.other.lang)}.`
-    : `${you} Nobody else is here yet.`;
+  if (!state.others.size) return `${you} Nobody else is here yet.`;
+  const others = [...state.others.values()].map(p => `${p.name}, ${languageName(p.lang)}.`);
+  return `${state.others.size + 1} people here. ${you} ${others.join(' ')}`;
 }
 
-function possessive(name) {
-  return name ? `${name}'s` : 'their';
+// "Ralph", "Ralph and Mia", "Ralph, Mia and Kenji"
+function nameList(names) {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+function chattingStatus() {
+  return state.others.size
+    ? `Chatting with ${nameList([...state.others.values()].map(p => p.name))}.`
+    : `Nobody else is here. Room ${state.code} stays open; share the room code or the invite link.`;
 }
 
 // Spell room codes with spaces so screen readers say "blue tiger 42".
@@ -174,51 +189,45 @@ function spoken(code) {
 
 // ---------- Incoming messages ----------
 
-function handleMessage(data) {
+function handleMessage(id, data) {
   switch (data.type) {
     case 'hello':
-      handleHello(data);
+      handleHello(id, data);
       break;
     case 'chat':
-      if (typeof data.text === 'string' && typeof data.lang === 'string') receiveChat(data);
-      break;
-    case 'full':
-      state.session?.close();
-      state.session = null;
-      backToJoin('That room already has two people in it.');
-      break;
-    case 'bye':
-      // The connection closing follows; handlePeerLeft announces it.
+      if (typeof data.text === 'string' && typeof data.lang === 'string') receiveChat(id, data);
       break;
   }
 }
 
-function handleHello(data) {
+function handleHello(id, data) {
   const name = String(data.name || 'Guest').slice(0, 40);
   const lang = LANGUAGE_CODES.includes(data.lang) ? data.lang : String(data.lang || 'en').slice(0, 20);
-  state.other = { name, lang };
+  const known = state.others.has(id);
+  state.others.set(id, { name, lang });
   renderPeople();
+  setStatus(chattingStatus());
+  if (known) return;
+  const wasHere = state.existing.get(id);
+  state.existing.delete(id);
   sounds.join();
   const sameLanguage = lang === state.me.lang;
-  announce(`${name} joined. Speaks ${languageName(lang)}.${sameLanguage ? ' Same language as you, so no translation is needed.' : ''}`);
-  setStatus(`Chatting with ${name}.`);
+  announce(`${name} ${wasHere ? 'is here' : 'joined'}. Speaks ${languageName(lang)}.${sameLanguage ? ' Same language as you, so no translation is needed.' : ''}`);
 }
 
-function handlePeerLeft() {
-  const name = state.other?.name ?? 'The other person';
-  state.other = null;
+function handlePeerLeft(id) {
+  state.existing.delete(id);
+  const person = state.others.get(id);
+  if (!person) return; // never introduced themselves
+  state.others.delete(id);
   renderPeople();
   sounds.leave();
-  if (state.asHost) {
-    setStatus(`${name} left. Room ${state.code} is still open; waiting for someone to join.`);
-    announce(`${name} left.`);
-  } else {
-    setStatus(`${name} left and the room has closed. Use the Leave button to go back and start or join another room.`, true);
-  }
+  setStatus(chattingStatus());
+  announce(`${person.name} left.${state.others.size ? '' : ' Nobody else is here now; the room stays open for others to join.'}`);
 }
 
-function receiveChat(data) {
-  const from = state.other ?? { name: 'Unknown' };
+function receiveChat(id, data) {
+  const from = state.others.get(id) ?? { name: 'Unknown' };
   // Translations can finish out of order; chain them so messages appear in sending order.
   state.displayChain = state.displayChain.then(async () => {
     const result = await translation.translate(data.text.slice(0, 4000), data.lang, state.me.lang);
@@ -266,7 +275,7 @@ async function translationRecovered() {
     fixed++;
   }
   const earlier = fixed ? ` ${fixed === 1 ? '1 earlier message has' : `${fixed} earlier messages have`} been translated; use Alt+number to hear them.` : '';
-  setStatus(state.other ? `Chatting with ${state.other.name}.` : '');
+  setStatus(chattingStatus());
   announce(`Translation is working again.${earlier}`);
 }
 
@@ -344,9 +353,9 @@ function handleNetError(type, err) {
   console.warn('TransChat network error', type, err);
   const code = spoken(state.code);
   const messages = {
-    'peer-unavailable': `No room called ${code} was found. Check the code, or ask the other person to start the room first.`,
-    'unavailable-id': `The room code ${code} is already in use. Choose Start a new room to get a different code.`,
-    'timeout': `Could not connect to room ${code}. The network may be blocking direct connections.`,
+    'peer-unavailable': `No room called ${code} was found. Check the code, or ask someone in the room to read it out again.`,
+    'unavailable-id': 'Could not find a free room code. Try Start a new room again.',
+    'timeout': `Could not connect to room ${code}. If someone in the room has just lost their connection, try again in a minute or two. Otherwise a network may be blocking direct connections.`,
     'browser-incompatible': 'This browser does not support direct connections (WebRTC).',
     'network': 'Lost contact with the connection server.',
     'server-error': 'The connection server is not responding. Try again in a minute.',

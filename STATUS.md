@@ -6,8 +6,16 @@ Last updated: 2026-10-17. Read this first when picking the work back up; [design
 
 - Live site: https://chessel85.github.io/TransChat/ (GitHub Pages from `main` of `Chessel85/TransChat`).
 - Translator test page: https://chessel85.github.io/TransChat/diag.html (tests Chrome's built-in translator only).
-- Built so far: two-person rooms over PeerJS, language picker, receiver-side translation, hidden polite live region for announcements, per-message `lang` attributes, Alt+1–9 re-read, Alt+Shift+1–9 original text, Alt+P / Alt+L / Alt+M, sound cues.
-- Decisions: 2 people is the main case; desktop first; **translation must work in any browser** (2026-10-17).
+- Built so far: rooms of up to 8 equal people over PeerJS (see below), language picker, receiver-side translation, hidden polite live region for announcements, per-message `lang` attributes, Alt+1–9 re-read, Alt+Shift+1–9 original text, Alt+P / Alt+L / Alt+M, sound cues.
+- Decisions: rooms of up to 8 equal people, no host (2026-10-17); desktop first; **translation must work in any browser** (2026-10-17).
+- Footer shows "Web site published …" from the page's Last-Modified header, to spot a cached old copy.
+
+## Rooms (changed 2026-10-17, v0.2.0)
+
+- Everyone connects directly to everyone. The room code is held by a "doorkeeper" browser that only tells newcomers who is there; when it leaves, the others take the code over automatically, so the room lasts until the last person leaves. Details in design.md §6.
+- Peer ID prefix changed to `transchat-v2-`, so old cached pages can't mix with new ones.
+- Tested automatically (Puppeteer, local server): 3 people in en/fr/de with translations both ways; first person leaves by button, by closing the tab, and by freezing; newcomer joins after the hand-over (1–4 s after leave/close, about 80 s after a freeze); 8 people incl. simultaneous joins, 9th refused; wrong code reported after about 14 s. Chrome and Firefox.
+- Live-region fix: Chrome re-read all old announcements when the oldest was removed; now earlier announcements are cleared together with the next one. Verified with NVDA in Chrome.
 
 ## Translation (changed 2026-10-17)
 
@@ -21,7 +29,7 @@ Tested automatically (Puppeteer, two separate browser contexts, local server): e
 
 ## Next steps
 
-1. User retest on the live site with NVDA: Firefox and Chrome, ideally two computers or two browsers.
+1. User retest of group rooms with NVDA on the live site: 3+ people, the first person leaving, someone joining afterwards.
 2. Screen-reader checks: do messages auto-read once, does the voice switch per `lang`, are own messages silent?
 3. Consider widening the language list (it is still Chrome's original set; Google supports many more).
 4. diag.html still only tests Chrome's built-in translator; update or retire it.
