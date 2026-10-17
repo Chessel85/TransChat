@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>How rooms work</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+</head>
+<body>
+<h1 id="how-rooms-work">How rooms work</h1>
+<p>This document describes how TransChat rooms are created, found and
+joined, and what happens when people leave. The examples use a room with
+the code <code>green-frog-12</code>.</p>
+<h2 id="where-a-room-lives">Where a room lives</h2>
+<p>A room is not stored anywhere. TransChat has no server of its own,
+and nothing records that a room exists. The only shared component is a
+free <strong>introduction service</strong> (the PeerJS signalling server
+at <code>0.peerjs.com</code>, run by the PeerJS project).</p>
+<p>The introduction service works like a telephone switchboard:</p>
+<ul>
+<li><strong>Holding a name.</strong> A browser can ask to be reachable
+under a name, provided no other browser is using that name at the time.
+The browser keeps the name only while it stays connected to the
+service.</li>
+<li><strong>Calling a name.</strong> A browser can ask to be put through
+to a name. The service passes the connection details (network addresses
+and encryption keys) between the two browsers and then steps aside.</li>
+<li><strong>What the service does not do.</strong> It never sees chat
+messages and stores nothing. It knows only which names are currently in
+use and the network addresses needed to connect them.</li>
+</ul>
+<h2 id="starting-a-room">Starting a room</h2>
+<p>When person A chooses <strong>Start a new room</strong>:</p>
+<ol type="1">
+<li>A’s browser connects to the service and receives a random
+<strong>personal name</strong>, for example <code>3f9c1a…</code>. This
+works like a private phone number.</li>
+<li>The browser picks a random room code, such as
+<code>green-frog-12</code>, and asks for a second name, the room’s
+<strong>public name</strong>: <code>transchat-v2-green-frog-12</code>.
+If that name is already in use, another code is picked
+automatically.</li>
+<li>A’s browser now holds the room’s public name. That is all it means
+for the room to exist. The browser holding the public name is called the
+<strong>doorkeeper</strong>.</li>
+</ol>
+<h2 id="who-creates-the-names">Who creates the names</h2>
+<ul>
+<li><strong>Room codes are created by TransChat</strong>, in the
+browser. When <strong>Start a new room</strong> is chosen, the page
+picks a random colour, a random animal and a number from 10 to 99 (for
+example <code>green-frog-12</code>), adds the prefix
+<code>transchat-v2-</code>, and asks the service to reserve that name.
+The service only accepts or refuses the request; if the name is taken,
+TransChat picks another code.</li>
+<li><strong>Personal names are created by the service.</strong> Each
+browser is given a random one when it connects. People never see these
+names.</li>
+<li><strong>When joining</strong>, the person types the room code, and
+TransChat adds the same <code>transchat-v2-</code> prefix before calling
+it.</li>
+</ul>
+<h2 id="why-one-browser-holds-the-room-name">Why one browser holds the
+room name</h2>
+<p>Everyone in a room knows the room code, but knowing a name is not the
+same as holding it. The introduction service lets only <strong>one
+browser at a time</strong> hold a given name, in the same way that a
+phone number rings one phone. Everyone may know a shop’s number, but
+when someone calls it, one particular phone rings and someone has to
+answer it.</p>
+<p>Joining a room means calling the room’s public name. The service puts
+the call through to whichever browser currently holds that name. If no
+browser holds it, the call fails and the newcomer is told the room was
+not found.</p>
+<p>The doorkeeper is therefore simply the browser that answers when
+someone calls the room’s name. It is needed because:</p>
+<ul>
+<li><strong>The service has no concept of a room.</strong> It only
+connects one browser to another by name. It cannot keep a list of
+members or make one name ring several browsers.</li>
+<li><strong>A newcomer needs someone to ask who is there.</strong>
+Answering the call to the room name is the only way the newcomer can
+find out whom to connect to.</li>
+</ul>
+<p>A service that kept each room’s member list would remove the need for
+a doorkeeper, but that would require TransChat to run a server of its
+own, which the design avoids. Once a newcomer has connected to everyone,
+the doorkeeper has no special part in the conversation; the role matters
+only when the next person joins.</p>
+<h2 id="joining-a-room">Joining a room</h2>
+<p>When person B enters the code <code>green frog 12</code> and chooses
+<strong>Join room</strong>:</p>
+<ol type="1">
+<li>B’s browser receives its own random personal name, then asks the
+service to put it through to
+<code>transchat-v2-green-frog-12</code>.</li>
+<li>The service connects B to the doorkeeper, A. In effect, B is asking
+“who is in this room?”</li>
+<li>The doorkeeper replies with the personal names of everyone in the
+room. At this point, that is only A.</li>
+<li>B ends that call and calls each person on the list by their personal
+name, again through the service. Once connected, messages go directly
+between the two browsers, encrypted, without passing through the
+service.</li>
+<li>When person C joins, the same steps happen, but the list contains
+both A and B, so C connects to each of them.</li>
+</ol>
+<p>Every browser in the room is connected directly to every other
+browser. Only the doorkeeper holds the room’s public name. Everyone else
+can be reached only by their random personal name, which is shared only
+with people inside the room.</p>
+<h2 id="leaving-a-room">Leaving a room</h2>
+<h3 id="when-the-doorkeeper-leaves">When the doorkeeper leaves</h3>
+<p>When A leaves, A’s browser gives up the name
+<code>transchat-v2-green-frog-12</code>. B and C notice that A has gone,
+and both ask the service for the public name. The first to ask receives
+it and becomes the new doorkeeper. B and C were already connected to
+each other, so their conversation continues uninterrupted, and new
+people can still join using the same code.</p>
+<h3 id="how-the-service-knows-the-holder-is-still-there">How the service
+knows the holder is still there</h3>
+<p>The service keeps a table of which browser holds each name, and it
+knows that a holder is still active in two ways:</p>
+<ol type="1">
+<li><strong>An open connection.</strong> A browser holding a name keeps
+a continuous connection (a WebSocket) open to the service, and the name
+belongs to that connection. When the person presses
+<strong>Leave</strong> or closes the tab, the connection closes and the
+service frees the name immediately. A newcomer can then join within a
+few seconds, once one of the remaining browsers has taken over.</li>
+<li><strong>Heartbeats.</strong> If a computer freezes, goes to sleep or
+loses its network, the connection can stay technically open with nothing
+coming through it. To detect this, the PeerJS library in each browser
+sends a short “heartbeat” message to the service every 5 seconds. If the
+service hears nothing from a holder for a while, it assumes the browser
+has gone and frees the name. The open-source PeerJS server waits 90
+seconds by default, and tests against the public service are consistent
+with that.</li>
+</ol>
+<h3 id="two-separate-checks">Two separate checks</h3>
+<p>TransChat has its own check inside the room, separate from the
+service’s. Every browser in the room sends a “still here” signal to
+every other browser every 5 seconds. The two checks do different
+jobs:</p>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Check</th>
+<th>Between</th>
+<th>Gives up after</th>
+<th>Decides</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TransChat’s “still here” signal</td>
+<td>Browsers in the room</td>
+<td>20 seconds of silence</td>
+<td>When the others hear “A left”</td>
+</tr>
+<tr>
+<td>PeerJS heartbeat</td>
+<td>Each browser and the service</td>
+<td>90 seconds of silence</td>
+<td>When the room name is free to be taken over</td>
+</tr>
+</tbody>
+</table>
+<p>If the doorkeeper’s computer freezes, the people in the room are
+therefore told after about 20 seconds that the doorkeeper has left, and
+they can keep chatting. Newcomers, however, cannot join until the
+service frees the room name, about a minute and a half after the
+freeze.</p>
+<h3 id="when-everyone-leaves">When everyone leaves</h3>
+<p>When the last person closes the page or presses
+<strong>Leave</strong>, their browser gives up the public name and the
+service forgets it. Nothing else needs to be cleaned up; the room simply
+stops existing:</p>
+<ul>
+<li>Anyone entering <code>green frog 12</code> afterwards is told that
+no such room was found.</li>
+<li>The messages are gone. They only ever existed in each person’s open
+page and were never saved anywhere.</li>
+<li>Someone starting a new room later might, by chance, be given the
+same code. That room is new and has no connection to the old one.</li>
+</ul>
+<h2 id="other-points">Other points</h2>
+<ul>
+<li><strong>Access.</strong> Anyone who knows the code can join, up to a
+limit of 8 people. The code works like a password that is easy to read
+aloud. Everyone in the room hears each person who joins announced.</li>
+<li><strong>Number of codes.</strong> There are about 17,000 possible
+codes. A code only needs to be unique among the rooms open at that
+moment, so this is more than enough.</li>
+<li><strong>Dependence on the introduction service.</strong> If the
+service is unavailable, nobody can start or join a room. Conversations
+already under way continue, because their connections do not pass
+through the service.</li>
+<li><strong>Helper servers.</strong> As well as the introduction
+service, the PeerJS library uses two kinds of helper server:
+<ul>
+<li>An <strong>address checker</strong> (Google’s STUN server), which
+tells each browser its public internet address.</li>
+<li><strong>Relay servers</strong> (TURN servers run by PeerJS). When a
+network blocks direct connections, messages travel through one of these
+relays instead. They remain encrypted between the two browsers, so the
+relay cannot read them. As a result, most pairs of people who cannot
+connect directly still reach each other through a relay.</li>
+</ul></li>
+</ul>
+</body>
+</html>

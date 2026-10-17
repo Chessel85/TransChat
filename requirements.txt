@@ -1,0 +1,56 @@
+I've had a chat with Gemini about a tool for letting two (or more) blind people do text chats when they speak different languages.
+
+Gemini came up with the following:
+
+To build a serverless, centrally translated, screen-reader-friendly chat application hosted on GitHub Pages, you can use a combination of static hosting, peer-to-peer (P2P) networking, and a public translation API.
+Because GitHub Pages only hosts static files (HTML, CSS, and client-side JavaScript) and cannot run a traditional backend server, the architecture relies entirely on the browser to handle communication and translation.
+1. Hosting Architecture: GitHub Pages
+• 
+How it works: The entire web app is packaged as a single static HTML/JS file and hosted directly via GitHub Pages.
+• 
+Why it fits: It requires zero server management or hosting fees. Anyone opens the same URL to load the interface.
+2. Connection Architecture: Peer-to-Peer (WebRTC)
+Without a centralized Node.js server to relay messages, browsers need a way to talk directly to each other.
+• 
+Technology: WebRTC via a wrapper library like PeerJS.
+• 
+How it works:
+1. 
+User A opens the page and generates a unique "Room ID" or connection code.
+2. 
+User B enters that code to connect directly to User A's browser over an encrypted peer-to-peer data channel.
+3. 
+A free, public signaling server (such as the default PeerJS cloud server) is only used initially to hand-shake and establish the direct connection between the two browsers; after that, messages flow directly device-to-device with no backend storage.
+3. Translation Architecture: Client-Side Centralized Translation
+To ensure that all screen readers (NVDA, JAWS, VoiceOver) benefit equally without relying on third-party browser extensions or screen-reader-specific plugins, the translation happens before the message is displayed.
+• 
+Technology: A free or low-cost REST translation API (such as MyMemory Translation API, LibreTranslate, or DeepL/Google Translate API if keys are provided).
+• 
+How it works:
+1. 
+User A (English speaker) types a message and hits Enter.
+2. 
+Before sending, User A's browser makes a quick asynchronous API call to the translation service, translating the text into User B's language (e.g., Spanish).
+3. 
+The already-translated text is sent across the WebRTC data channel to User B.
+4. 
+Conversely, if User B replies in Spanish, their browser translates it into English via the API before sending it over, so User A receives it already in English.
+5. 
+Both users always send text that is natively readable by the recipient.
+4. Accessibility & Screen Reader Architecture
+• 
+Technology: Semantic HTML and ARIA (Accessible Rich Internet Applications) live regions.
+• 
+How it works:
+• 
+The Input Region: A standard multi-line text area or text input where pressing Enter triggers the translation-and-send workflow, keeping focus right where the user is typing.
+• 
+The Log Region: Implemented using role="log" and aria-live="polite". When incoming translated text is appended to the DOM, the screen reader automatically intercepts the DOM mutation and speaks the new message aloud without the user needing to manually tab away from their input box or trigger an external translation shortcut.
+
+
+The above does not state how the user defines what their language is but presumably this needs doing as well as discovering from the other side what the destination language is.
+Can you plan in more detail a tool for what I want?  Talk me through the solution you devise, maybe in a design.md file.  
+
+claude: The chat is at 
+https://chessel85.github.io/TransChat/                                                           
+ 

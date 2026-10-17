@@ -165,7 +165,7 @@ Blind users can't glance at the other person's screen to see if their message ca
 - Newcomers knocking during a hand-over get "not found" and retry for about 9 s before giving up.
 - **Liveness:** everyone pings everyone every 5 s; a connection silent for 20 s is dropped and announced as "left". A `bye` is treated as leaving immediately.
 - The room ends only when the last person leaves.
-- Known gap: if one pair of members cannot connect directly (blocking network) they don't see each other's messages; the newcomer is told. A fix would be others relaying for that pair — only if it turns up in real use.
+- Known gap: if one pair of members cannot connect at all, even through a TURN relay, they don't see each other's messages; the newcomer is told. A fix would be others relaying for that pair — only if it turns up in real use.
 
 ### 6.3 Message protocol
 
@@ -187,7 +187,7 @@ The original text is always what's transmitted; translation happens only at the 
 ### 6.4 Network realities
 
 - PeerJS's public signalling server is used only for the handshake; then data flows browser-to-browser, encrypted (DTLS) by WebRTC.
-- Some networks (strict corporate/hotel/mobile NAT) block direct connections. These need a TURN relay. v1 uses STUN only and shows a clear error ("Couldn't connect directly. This network may block it."). v2: configure a free TURN service (e.g. Open Relay) as fallback.
+- Some networks (strict corporate/hotel/mobile NAT) block direct connections. PeerJS's default settings already cover this: Google's STUN server tells each browser its public address, and PeerJS's free TURN relays (`eu-0` and `us-0.turn.peerjs.com`) carry the connection when a direct one is impossible, still encrypted end to end. If a pair still cannot connect, the newcomer is told.
 - Reconnect automatically on brief drops; announce "Connection lost, retrying" / "Reconnected".
 
 ---
@@ -285,7 +285,7 @@ Short, distinct earcons (generated with Web Audio, no files): message received, 
 4. **Accessibility polish** — shortcuts, re-read last N, sound cues, announcement-method toggle, localized interface strings.
 5. **Built-in translator** engine + optional API key.
 6. **Back-translation check**, view original.
-7. **Hardening** — reconnects, TURN fallback, room lock.
+7. **Hardening** — reconnects, room lock.
 
 Steps 1–3 give a usable two-language, multi-person chat; that's the natural first milestone to try with real people.
 
