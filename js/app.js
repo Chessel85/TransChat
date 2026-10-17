@@ -437,5 +437,14 @@ function initChatScreen() {
   window.addEventListener('pagehide', () => state.session?.close());
 }
 
+// GitHub Pages sends each deploy's time as the page's Last-Modified date, so
+// this shows which version of the site is loaded.
+function showPublished() {
+  const published = new Date(document.lastModified);
+  if (isNaN(published)) return;
+  $('published').textContent = `Web site published ${published.toLocaleString(undefined, { dateStyle: 'long', timeStyle: 'short' })}`;
+}
+
+showPublished();
 initJoinScreen();
 initChatScreen();
